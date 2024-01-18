@@ -4,14 +4,20 @@ import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.neighbors import NearestNeighbors
 
-column_names = ['Sıra No', 'Demirbaş No', 'Tür Adı', 'Alt Tür Adı', 'Eser Adı', 'Yazar Adı Soyadı', 'Konu Başlığı', 'Konu', 'Yayın Dili', 'Yayın Yılı', 'Yayın Evi']
-df = pd.read_csv("books.csv", sep=';', quotechar='"', names=column_names)
+column_names_books = ['Sıra No', 'Demirbaş No', 'Tür Adı', 'Alt Tür Adı', 'Eser Adı', 'Yazar Adı Soyadı',
+                      'Konu Başlığı', 'Konu', 'Yayın Dili', 'Yayın Yılı', 'Yayın Evi']
+
+df_books = pd.read_csv("Data/books.csv", sep=';', quotechar='"', names=column_names_books)
+
+books = df_books[['Demirbaş No', 'Tür Adı', 'Alt Tür Adı', 'Eser Adı',
+                      'Yazar Adı Soyadı', 'Konu Başlığı', 'Konu', 'Yayın Dili', 'Yayın Yılı',
+                      'Yayın Evi']]
 
 def preprocess(text):
     return re.sub(r'[^a-z\s]', '', str(text).lower())
 
 # creating a new column 'processed' with the pre-processing function applied on the 'Konu Başlığı'
-df["processed"] = df["Konu Başlığı"].apply(preprocess)
+df_books["processed"] = df_books["Konu Başlığı"].apply(preprocess)
 
 # getting stopwords from a GitHub repo
 stopwords = ''
@@ -23,8 +29,7 @@ except requests.exceptions.RequestException as e:
 
 # creating the numerical feature matrix
 vectorizer = TfidfVectorizer(stop_words=stopwords)
-tfid_matrix = vectorizer.fit_transform(df["processed"])
-print(tfid_matrix.shape)
+tfid_matrix = vectorizer.fit_transform(df_books["processed"])
 
 # setting up the ML algorithm (nearest neighbor)
 n_neighbor = 6
@@ -33,12 +38,11 @@ model.fit(tfid_matrix)
 
 # creating a mapping from book titles to index
 
-title_index = pd.Series(df.index, index=df["Eser Adı"].apply(lambda x: x.lower()))
+title_index = pd.Series(df_books.index, index=df_books["Eser Adı"].apply(lambda x: x.lower()))
 
-
-def recommendation(title, model=model, df=df, title_index=title_index):
+def recommendation(title, model=model, df=df_books, title_index=title_index):
     # Girdi olarak verilen kitabın indeksini al
-    idx = title_index.get(title)
+    idx = title_index.get(title.lower())
 
     # Eğer kitap bulunamazsa, hata mesajı döndür
     if idx is None:
@@ -47,11 +51,24 @@ def recommendation(title, model=model, df=df, title_index=title_index):
     # Modeli kullanarak komşuları bul
     distances, indices = model.kneighbors(tfid_matrix[idx])
 
-    # İlk sonucu atlayarak önerilen kitapların indekslerini al
-    indices = indices[0][1:]
+    # Önerilen kitapların başlıklarını al
+    recommended_titles = df['Eser Adı'].iloc[indices[0]].tolist()
 
-    # Önerilen kitapların başlıklarını döndür
-    return df['Eser Adı'].iloc[indices].values.tolist()
+    # Girdi kitabını öneri listesinden çıkar ve tekrar edenleri filtrele
+    recommended_titles = [title for title in recommended_titles if title.lower() != title.lower()]
+    unique_recommended_titles = list(dict.fromkeys(recommended_titles))
+
+    # Yeterli sayıda benzersiz öneri sağlamak için kontrol
+    additional_indices = 1
+    max_index = len(indices[0]) - 1  # Maksimum indeks değeri
+    while len(unique_recommended_titles) < n_neighbor - 1 and additional_indices <= max_index:
+        new_index = indices[0][additional_indices]
+        new_title = df_books['Eser Adı'].iloc[new_index]
+        if new_title.lower() != title.lower() and new_title not in unique_recommended_titles:
+            unique_recommended_titles.append(new_title)
+        additional_indices += 1
+
+    return unique_recommended_titles
 
 
 def main():
@@ -63,7 +80,7 @@ def main():
             print("Üzgünüz! Girdiğiniz kitap veritabanında mevcut değil. Başka bir kitap deneyiniz.")
             continue
         rec = recommendation(book_title)
-        print("\nİşte sizin için öneriler: '{}'".format(book_title.capitalize()))
+        print("\nİşte '{}' adlı kitap için öneriler: ".format(book_title.capitalize()))
         print(rec)
         print("\n")
 
